@@ -115,6 +115,9 @@ class Telemetrix(threading.Thread):
         # flag to allow the reporter and receive threads to run.
         self.run_event = threading.Event()
 
+        # event to synchronize feature list retrieval
+        self._feature_ready_event = threading.Event()
+
         # check to make sure that Python interpreter is version 3.7 or greater
         python_version = sys.version_info
         if python_version[0] >= 3:
@@ -347,7 +350,13 @@ class Telemetrix(threading.Thread):
         # get the features list
         command = [PrivateConstants.GET_FEATURES]
         self._send_command(command)
-        time.sleep(.2)
+
+        # Wait for the _features_report handler to signal the event.
+        # A timeout prevents infinite hangs if the server drops the packet.
+        if not self._feature_ready_event.wait(timeout=5.0):
+            if self.shutdown_on_exception:
+                self.shutdown()
+            raise RuntimeError('Timeout waiting for feature list from server.')
 
         # Have the server reset its data structures
         command = [PrivateConstants.RESET]
@@ -2515,6 +2524,8 @@ class Telemetrix(threading.Thread):
 
     def _features_report(self, report):
         self.reported_features = report[0]
+        # Signal the main thread that initialization can proceed
+        self._feature_ready_event.set()
 
     def _run_threads(self):
         self.run_event.set()
